@@ -1,0 +1,17 @@
+torch
+numpy
+opencv-python
+Pillow
+pathlib
+pytorch-lightning
+datetime
+torchvision
+sklearn
+tifffile
+kornia
+pytorch-fid
+scikit-image
+boto3
+s3path
+pandas
+matplotlib
