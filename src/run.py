@@ -14,8 +14,8 @@ def read_file_lines(path_to_config):
     return lines
 
 
-# Specify your absolute path to your config.txt
-path_to_config = "/media/data1/projsweep3D/src/config.txt"
+# Specify your path to your config.txt
+path_to_config = "./config.txt"
 lines = read_file_lines(path_to_config)
 save_dir, input_path, target_path, n_epochs = [line[:-1] for line in lines]
 run_training(save_dir=save_dir, target_path=target_path, input_path=input_path, n_epochs=n_epochs)
