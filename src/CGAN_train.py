@@ -2,28 +2,24 @@
 Created on 2020-07-01. 14:05
 Last edited 2021-11-15
 @authors: Christoffer Edlund and Edvin Forsgren
-
 """
 import os
 import torch
 from typing import *
-import sys
 from torch.utils.data.dataloader import DataLoader
 from torch.nn import functional as F
 from pytorch_lightning import Trainer
-import dl_imaging_kit as dlik
+from dataset import create_dataloader
 import numpy as np
-from data.dataset import create_dataloader
 import cv2
 import pix2pix_networks as p2p
-from dl_imaging_kit.lightning.gan import CGANModule
+from context import dlik
+from context import CGANModule
 import time
-
-sys.path.append("/home/edfo/local_libs/tools/")
 
 
 class CGAN(CGANModule):
-    def __init__(self, path=None, path_a=None, path_b=None, gen_type="OSA"):
+    def __init__(self, path=None, path_a=None, path_b=None, gen_type="OSA", trainer=None):
         super(CGAN, self).__init__()
         self.l1_loss_weight = 10
         self.l1_weight = 10
@@ -38,6 +34,7 @@ class CGAN(CGANModule):
         self.path_b = path_b
         self.optidx = None
         self.gen_type = gen_type
+        self.trainer = trainer
 
     def l1_loss_weight(self):
         return 10
@@ -47,7 +44,7 @@ class CGAN(CGANModule):
                                       out_channels=1,
                                       convs_per_depth=(5, 5, 5, 5),
                                       channels_per_depth=(32, 64, 128, 256),
-                                      block_class=dlik.models.blocks.OSABlock,  # dlik.models.blocks.ConvBlock)
+                                      block_class=dlik.models.blocks.OSABlock,  # dlik.models.blocks.ConvBlock) U
                                       block_kwargs={
                                           'squeeze_and_excitation_block': dlik.models.blocks.EfficientSqueezeAndExcitation})
         return model
@@ -88,14 +85,10 @@ class CGAN(CGANModule):
             loss_g = self.loss()(predicton, label_real)
 
             loss = loss_g + l1_loss * self.l1_weight
-            log = {"loss_G": loss_g.item(), "l1_loss_g": l1_loss.item()}
-            # if self.logger is not None:
-            #     self.logger.log_metrics(log)
-            # output = OrderedDict({'loss': loss, "log": log})
             output = {'loss': loss}
             return output
 
-        if optimizer_idx == 1:  # and epoch_idx > 50:
+        if optimizer_idx == 1:
             fake_y = self.forward(train_x)
 
             disc_input_real = torch.cat([train_x, train_y], dim=1)  # Combine real input with real output
@@ -117,11 +110,6 @@ class CGAN(CGANModule):
             loss_fake = self.loss()(fake_prediction, label_fake)
 
             loss_D = (loss_real + loss_fake) / 2
-            log = {"loss_D": loss_D.item(), "loss_D_fake": loss_fake.item(),
-                   "loss_D_real": loss_real.item()}
-            # if self.logger is not None:
-            #     self.logger.log_metrics(log)
-            # output = OrderedDict({'loss': loss_D, "log": log})
             output = {'loss': loss_D}
             return output
 
@@ -165,20 +153,20 @@ class CGAN(CGANModule):
         if self.vloss is None:
             self.vloss = val_loss_mean.item()
             val_model_path = f"{self.path}/min_val"
-            trainer.save_checkpoint(val_model_path + ".ckpt")
+            self.trainer.save_checkpoint(val_model_path + ".ckpt")
 
         # Save a bunch of models for evaluation purposes
         if (self.current_epoch % 50) == 0:
             epoch_path = f"{self.path}/epoch_models"
             if not os.path.isdir(epoch_path):
                 os.mkdir(epoch_path)
-            trainer.save_checkpoint(f"{epoch_path}/{self.current_epoch}_model.ckpt")
+            self.trainer.save_checkpoint(f"{epoch_path}/{self.current_epoch}_model.ckpt")
 
         # Update the model to the new minimum validation loss model
         if self.vloss > val_loss_mean.item():
             self.vloss = val_loss_mean.item()
             val_model_path = f"{self.path}/min_val"
-            trainer.save_checkpoint(val_model_path + ".ckpt")
+            self.trainer.save_checkpoint(val_model_path + ".ckpt")
 
     def test_step(self, batch, batch_idx):
         x, y = batch
@@ -194,7 +182,10 @@ class CGAN(CGANModule):
             test_in_img = x.detach().to('cpu').numpy()
             test_out_im = y.detach().to('cpu').numpy()
             image = np.exp(test_pred_img)
-            scale = (255 / np.max(image))
+            if np.max(image) == 0:
+                scale = 1
+            else:
+                scale = (255 / np.max(image))
             image = np.squeeze(image)
             image = image * scale
             filename = f"{img_path}{batch_idx:03d}_{epoch_idx}_Test_pred.png"
@@ -212,39 +203,34 @@ class CGAN(CGANModule):
             cv2.imwrite(filename, image)
 
     def train_dataloader(self) -> DataLoader:
-        # path_a = self.input_path #  "/media/data1/projsweep3D/201029_3D_FLR_incucyte/IC12_VID1264_single plane MS/c2sumsweepAligned"
-        # path_b = self.target_path #  "/media/data1/projsweep3D/201029_3D_FLR_incucyte/IC12_VID1264_single plane MS/C2oqcProj"
         return create_dataloader(self.path_a, self.path_b, batch_size=2, split=0.896, on_gpu=self.on_gpu)
 
     def val_dataloader(self):
-        # path_a = self.input_path  # "/media/data1/projsweep3D/201029_3D_FLR_incucyte/IC12_VID1264_single plane MS/c2sumsweepAligned"
-        # path_b = self.target_path  # "/media/data1/projsweep3D/201029_3D_FLR_incucyte/IC12_VID1264_single plane MS/C2oqcProj"
         return create_dataloader(self.path_a, self.path_b, batch_size=1, split=0.896, crop_size=(512, 512), train=False,
                                  on_gpu=self.on_gpu)
 
     def test_dataloader(self):
-        # path_a = self.input_path #  "/media/data1/projsweep3D/201029_3D_FLR_incucyte/IC12_VID1264_single plane MS/c2sumsweepAligned"
-        # path_b = self.target_path #  "/media/data1/projsweep3D/201029_3D_FLR_incucyte/IC12_VID1264_single plane MS/C2oqcProj"
         return create_dataloader(self.path_a, self.path_b, train=False, batch_size=1, split=0.896, crop_size=(512, 512),
                                  on_gpu=self.on_gpu)
 
 
-if __name__ == "__main__":
-    path = "/media/data1/projsweep3D/test_dir"
+def run_training(save_dir, target_path,  input_path, n_epochs):
+    path = save_dir
     if not os.path.isdir(path):
         os.mkdir(path)
-
-    input_path = "/media/data1/projsweep3D/201029_3D_FLR_incucyte/IC12_VID1264_single plane MS/c2sumsweepAligned"
-    target_path = "/media/data1/projsweep3D/201029_3D_FLR_incucyte/IC12_VID1264_single plane MS/C2oqcProj"
-    max_epochs = 4
+    if not os.path.isdir(target_path):
+        AssertionError("target_path doesn't exist")
+    if not os.path.isdir(input_path):
+        AssertionError("input_path doesn't exist")
+    max_epochs = int(n_epochs)
     num_nodes = 1
     gpus = -1  # -1 -> Train on all available GPUs
     accelerator = "ddp"  # Generally fastest when training on GPU. Details: https://pytorch-lightning.readthedocs.io/en/latest/advanced/multi_gpu.html
     default_root_dir = f"{path}/checkpoints"
     generator_type = "OSA"
-    model = CGAN(path=path, path_a=input_path, path_b=target_path, gen_type=generator_type)
     trainer = Trainer(gpus=gpus, accelerator=accelerator, max_epochs=max_epochs, num_nodes=num_nodes, logger=None,
-                      default_root_dir=f"{path}/checkpoints")
+                      default_root_dir=default_root_dir)
+    model = CGAN(path=path, path_a=input_path, path_b=target_path, gen_type=generator_type, trainer=trainer)
     t = time.time()
     trainer.fit(model)
     print("Training time:", time.time() - t)
@@ -258,3 +244,19 @@ if __name__ == "__main__":
     trainer.save_checkpoint(model_path + ".ckpt")
     torch.save(model.generator, model_path + "_generator" + ".pth")
     torch.save(model.discriminator, model_path + "_discriminator" + ".pth")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
