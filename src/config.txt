@@ -1,0 +1,9 @@
+#Config file for run.py
+#save_dir:
+/media/data1/projsweep3D/save_dir
+#input_path:
+/media/data1/projsweep3D/201029_3D_FLR_incucyte/IC12_VID1264_single plane MS/c2sumsweepAligned
+#target_path:
+/media/data1/projsweep3D/201029_3D_FLR_incucyte/IC12_VID1264_single plane MS/C2oqcProj
+#n_epochs
+4
