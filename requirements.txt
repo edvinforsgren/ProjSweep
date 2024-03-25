@@ -6,7 +6,7 @@ pathlib
 pytorch-lightning
 datetime
 torchvision
-sklearn
+scikit-learn
 tifffile
 kornia
 pytorch-fid
